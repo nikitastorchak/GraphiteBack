@@ -1,16 +1,22 @@
+
+const ObjectId = require('mongodb').ObjectId;
 const Product = require('../../db/models/product/product')
+const Cart = require('../../db/models/cart/cart')
 const Category = require('../../db/models/categories/categories')
 const mongoose = require("mongoose");
 const moment = require("moment");
+
 
 module.exports.addProduct = (req, res) => {
   const {
     categories,
     price,
     discount,
+    priceWithDiscount,
     name,
     description,
     preview,
+    images,
   } = req.body
   res.set('Access-Control-Allow-Origin', '*');
   Product
@@ -18,11 +24,12 @@ module.exports.addProduct = (req, res) => {
     categories: categories.split(' '),
     price,
     discount,
-    priceWithDiscount: discount ? price * ((100 - discount)/100) : price,
+    priceWithDiscount,
     likes: 0,
     name,
     description,
     preview,
+      images,
   })
     .then(result => {
       res.send(result);
@@ -31,30 +38,36 @@ module.exports.addProduct = (req, res) => {
 
 module.exports.editProduct = (req, res) => {
   res.set('Access-Control-Allow-Origin', '*');
-  console.log(req.body)
+
   const {
-    id,
+    _id,
     name,
     categories,
+    discount,
     price,
     priceWithDiscount,
     description,
     preview,
+    images,
   } = req.body
-  Product.findOneAndUpdate({_id: id}, {$set:
+  Product.findOneAndUpdate({_id: ObjectId(_id)},
     {
-    name,
+      name,
       categories: categories?.split(','),
       price,
+      discount,
       priceWithDiscount,
       description,
       preview,
-  }}).then((result) => {
+      images,
+  }).then((result) => {
+    console.log(result)
     res.send(result);
   }).catch((err) => {
     res.send(err);
   });
 };
+
 module.exports.showProductsBySearch = (req, res) => {
   const {name} = req.query
   res.set('Access-Control-Allow-Origin', '*');
@@ -85,6 +98,132 @@ module.exports.showProductById = (req, res) => {
   }).catch((err) => {
     res.send(err);
   });
+};
+
+module.exports.addProductsToCart = async ( req, res ) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const {
+    userId,
+    products,
+  } = req.body
+  const isUserExist = await Cart.findOne({ userId })
+  if(isUserExist) {
+    await Promise.all(products.map(async product => {
+      const {productId, count} = product
+      const isProductInCart = await Cart.findOne({ cart: { $elemMatch: { productId } } })
+      if(isProductInCart) {
+        Cart.updateOne(
+          {userId},
+          {$inc: {"cart.$[elem].count": count}},
+          {arrayFilters: [{"elem.productId": productId}]}
+        ).then(result => {
+          res.send(result);
+        })
+      } else {
+        Cart.updateOne(
+          {userId},
+          {$push: {cart: { productId, count } } }
+        ).then(result => {
+          res.send(result);
+        })
+      }
+    }))
+  } else {
+    await Promise.all(products.map(async product => {
+      const {productId, count} = product
+      await Cart.create(
+        {
+          userId,
+          cart: [{
+            productId,
+            count,
+          }]
+        }
+      )
+    }))
+
+  }
+}
+  module.exports.deleteProductFromCart = async (req, res) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    const {
+      userId,
+      productId,
+    } = req.body
+    const isUserExist = await Cart.findOne({userId})
+
+    Cart.updateOne({ userId }, {$inc: {
+        "cart.$[elem].count": 1
+      }}, { arrayFilters: [ { "elem.productId": productId } ] })
+      .then(result => {
+        res.send(result);
+      })
+  }
+module.exports.updateCart = async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const {
+    userId,
+    products,
+  } = req.body
+  const isUserExist = await Cart.findOne({userId})
+  isUserExist ? (
+
+      await Promise.all(products.map(item => (
+      Cart.updateOne({ userId }, {
+        $push: {
+          cart: item
+        }
+      })))).then(result => {
+        res.send(result);
+      })
+    ) :
+    Cart.create({
+      userId,
+      cart:products,
+    }).then(result => {
+      res.send(result);
+    });
+  res.send(UniqCart)
+};
+
+module.exports.showCartUnauthorized = async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const {
+    cart
+  } = req.body
+  const result = await Promise.all(cart.map(item => (
+    Product.find({_id:item})
+)))
+  res.send(result)
+};
+
+module.exports.showUserCart = async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const {
+    userId
+  } = req.query
+  const userCart = await Cart.find({userId})
+
+  res.send(userCart)
+};
+
+module.exports.showUserCartProducts = async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  const {
+    userId
+  } = req.query
+  const userCart = await Cart.find({userId})
+  const productsIds = userCart[0].cart
+  const result = await Promise.all(productsIds.map(async _id => {
+    const result = await Product.find({_id})
+    return result[0]
+  }))
+  res.send(result)
+};
+
+module.exports.showCarts= (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  Cart.find({}).then(result => res.send(result));
 };
 
 module.exports.showNewProducts= (req, res) => {

@@ -10,6 +10,7 @@ const productScheme = new Schema({
   name:String,
   description:String,
   preview:String,
+  images:[String]
 
 }, { timestamps: true });
 

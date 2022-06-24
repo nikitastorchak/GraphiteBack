@@ -8,28 +8,30 @@ const tokenService = require("../service/token-service");
 
 class UserController {
   async registration(req, res, next) {
-    console.log(req.body)
     try {
-      const {login, password, role} = req.body;
+      const { name, secondName, email, password, repeatPassword, address, phone } = req.body;
+      const role = "ADMIN"
       const errors = validationResult(req)
-      console.log(errors)
       if (!errors.isEmpty()) {
-        return res.status(400).json({message: 'Ошибка при валидации пароля', errors})
+        return res.status(400).json({message: 'Ошибка при валидации', errors})
       }
-      const candidate = await userModel.findOne({login})
+      const candidate = await userModel.findOne({phone})
       if (candidate) {
-        return res.status(400).json({message:`Пользователь ${login} уже существует!`})
+        return res.status(400).json({message:`Пользователь с таким номером уже зарегистрирован. Попробуйте войти`})
       }
       const hashPassword = await bcrypt.hash(password, 5)
       const userRole = await roleModel.findOne({value:role})
       if (userRole === null) {
         return res.status(400).json({message:`Роли ${role} нет в списке доступных!`})
       }
-      const user = await userModel.create({login, password: hashPassword, role: [userRole.value]})
+      const user = await userModel.create({name, secondName, email, address, phone, password: hashPassword, role: [userRole.value]})
       const userDto = new UserDto(user)
       const tokens = tokenService.generateTokens({...userDto})
       await tokenService.saveToken(userDto.id, tokens.refreshToken)
-      return res.json({...tokens})
+      return res.json({
+        user,
+        tokens
+      })
     } catch (e) {
       next(e)
     }
@@ -37,10 +39,10 @@ class UserController {
 
   async login(req, res, next) {
     try {
-      const {login, password} = req.body
-      const user = await userModel.findOne({login})
+      const {phone, password, type, email} = req.body
+      const user = type === "email" ? await userModel.findOne({email}) : await userModel.findOne({phone})
       if (!user) {
-        return res.status(400).json({message:'Пользователь с таким логином не найден'})
+        return res.status(400).json({message:'Пользователь с такими данными не найден'})
       }
       const isPassEquals = await bcrypt.compare(password, user.password)
       if(!isPassEquals) {
@@ -49,9 +51,12 @@ class UserController {
       const userDto = new UserDto(user)
       const tokens = tokenService.generateTokens({...userDto})
       await tokenService.saveToken(userDto.id, tokens.refreshToken)
-      return res.json({
-        ...tokens,
-      })
+      return res.json(
+        {
+          user,
+          tokens
+        }
+      )
     } catch (e) {
       next(e)
     }
@@ -67,15 +72,29 @@ class UserController {
     }
   }
 
+  async getUser(req, res, next) {
+    try {
+      const { accesstoken } = req.headers
+      const userData = tokenService.validateAccessToken(accesstoken)
+      const user = await userModel.findById(userData?.id)
+      if (!userData || !user) {
+        return res.status(401).json({message:'Пользователь не авторизован'})
+      }
+      return res.json({
+        user
+      })
+    } catch (e) {
+      next(e)
+    }
+  }
+
   async refresh(req, res, next) {
     try {
       const { refreshtoken } = req.headers
-      console.log(refreshtoken)
       if (!refreshtoken) {
         return res.status(401).json({message:'Пользователь не авторизован'})
       }
       const userData = tokenService.validateRefreshToken(refreshtoken)
-      console.log('UserData', userData)
       const tokenFromDb = await tokenService.findToken(refreshtoken)
       if (!userData || !tokenFromDb) {
         return res.status(401).json({message:'Пользователь не авторизован'})
